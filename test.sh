@@ -96,20 +96,25 @@ else
     fail "/etc/camera/ does not exist"
 fi
 
-# Systemd service
+# Systemd service (on-demand relay)
 echo ""
-echo "Service:"
-if systemctl is-enabled ipu6-camera-loopback &>/dev/null; then
-    pass "ipu6-camera-loopback enabled"
+echo "Service (on-demand relay):"
+if systemctl is-enabled v4l2-relayd &>/dev/null; then
+    pass "v4l2-relayd enabled"
 else
-    fail "ipu6-camera-loopback NOT enabled"
+    fail "v4l2-relayd NOT enabled"
 fi
 
-if systemctl is-active ipu6-camera-loopback &>/dev/null; then
-    pass "ipu6-camera-loopback running"
+if systemctl is-active v4l2-relayd &>/dev/null; then
+    pass "v4l2-relayd active (idle — sensor/LED only power on when an app opens the camera)"
 else
-    fail "ipu6-camera-loopback NOT running"
+    fail "v4l2-relayd NOT active"
     echo ""
     echo "  Recent logs:"
-    journalctl -u ipu6-camera-loopback -n 5 --no-pager 2>/dev/null | sed 's/^/    /'
+    journalctl -u v4l2-relayd -n 5 --no-pager 2>/dev/null | sed 's/^/    /'
+fi
+
+# Warn if the old always-on service is still present
+if systemctl is-enabled ipu6-camera-loopback &>/dev/null 2>&1; then
+    warn "old always-on ipu6-camera-loopback still enabled — disable it: sudo systemctl disable --now ipu6-camera-loopback"
 fi

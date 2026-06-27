@@ -19,6 +19,8 @@ Browser (Chrome, Brave, Edge)
         ↑
 /dev/video99  ← v4l2loopback virtual camera
         ↑
+v4l2-relayd  ← starts/stops the pipeline on demand (LED only on while in use)
+        ↑
 GStreamer:  icamerasrc → videoconvert → v4l2sink
         ↑
 Intel Camera HAL  (libcamhal — userspace ISP)
@@ -27,6 +29,10 @@ IPU6 PSYS (out-of-tree)  +  IPU6 ISYS (mainline)
         ↑
 OV2740 sensor  ←  IVSC (powers the sensor on/off)
 ```
+
+**On-demand:** `v4l2-relayd` watches `/dev/video99` and only runs the GStreamer
+pipeline (and thus powers the sensor) while an application has the camera open.
+When no app is using it, the sensor is idle and the privacy LED is off.
 
 ## Supported Hardware
 
@@ -67,14 +73,14 @@ Test at [webcamtest.com](https://webcamtest.com) in Chrome, Brave, or Edge.
 | 4 | Install firmware + ISP libs + create linker symlinks | [intel/ipu6-camera-bins](https://github.com/intel/ipu6-camera-bins) |
 | 5 | Build Camera HAL (`libcamhal`) | [intel/ipu6-camera-hal](https://github.com/intel/ipu6-camera-hal) |
 | 6 | Build `icamerasrc` GStreamer plugin | [intel/icamerasrc](https://github.com/intel/icamerasrc) (`icamerasrc_slim_api`) |
-| 7 | Configure v4l2loopback `/dev/video99` + systemd service | — |
+| 7 | Configure v4l2loopback `/dev/video99` + `v4l2-relayd` on-demand service | Ubuntu repos |
 
 ## Commands
 
 ```bash
-sudo systemctl status ipu6-camera-loopback    # Service status
-sudo journalctl -u ipu6-camera-loopback -f    # Live logs
-sudo ./uninstall.sh                           # Remove everything
+sudo systemctl status v4l2-relayd    # Service status (idle until an app opens the camera)
+sudo journalctl -u v4l2-relayd -f    # Live logs
+sudo ./uninstall.sh                  # Remove everything
 ```
 
 ## Troubleshooting
@@ -103,13 +109,20 @@ Firefox Snap can't access v4l2loopback. Use Chrome, Brave, Edge, or install Fire
 
 ### 1080p instead of 720p
 
+Edit `/etc/default/v4l2-relayd`, set `WIDTH=1920` / `HEIGHT=1080` and update the
+caps in `VIDEOSRC` to match (`width=1920,height=1080` in both filters), then:
 ```bash
-sudo systemctl edit ipu6-camera-loopback
+sudo systemctl restart v4l2-relayd
 ```
-Replace `1280,height=720` with `1920,height=1080` in both caps, then:
+
+### LED stays on all the time
+
+You're likely still running the old always-on service. Disable it:
 ```bash
-sudo systemctl restart ipu6-camera-loopback
+sudo systemctl disable --now ipu6-camera-loopback
+sudo systemctl enable --now v4l2-relayd
 ```
+With `v4l2-relayd` the sensor (and LED) only power on while an app is using the camera.
 
 ## Key Insights
 

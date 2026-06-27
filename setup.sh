@@ -65,7 +65,7 @@ step "Step 1/7: Installing build dependencies..."
 apt-get update -qq
 apt-get install -y --no-install-recommends \
     build-essential cmake dkms git pkg-config \
-    "linux-headers-${KERNEL_VER}" v4l2loopback-dkms \
+    "linux-headers-${KERNEL_VER}" v4l2loopback-dkms v4l2-relayd v4l-utils \
     libexpat1-dev automake autoconf libtool \
     libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
     gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-tools \
@@ -80,7 +80,7 @@ apt-get autopurge -y oem-*-meta 2>/dev/null || true
 dkms status 2>/dev/null | grep -i "ipu6" | while IFS= read -r line; do
     m=$(echo "$line" | cut -d',' -f1 | xargs)
     dkms remove "$(echo "$m" | cut -d/ -f1)/$(echo "$m" | cut -d/ -f2)" --all 2>/dev/null || true
-done
+done || true
 info "Cleanup complete"
 
 # === STEP 3: IPU6 PSYS kernel module (out-of-tree) ===
@@ -96,6 +96,7 @@ DKMS_SRC="/usr/src/ipu6-drivers-${DKMS_VER}"
 rm -rf "$DKMS_SRC"; mkdir -p "$DKMS_SRC"
 cp -r drivers/ "$DKMS_SRC/"
 cp -r include/ "$DKMS_SRC/" 2>/dev/null || true
+[ -f Makefile ]  && cp Makefile "$DKMS_SRC/"
 [ -f dkms.conf ] && cp dkms.conf "$DKMS_SRC/"
 [ -d patches ]   && cp -r patches "$DKMS_SRC/"
 
@@ -131,6 +132,7 @@ mkdir -p /lib/firmware/intel/ipu
 cp -f lib/firmware/intel/ipu/*.bin /lib/firmware/intel/ipu/ 2>/dev/null || true
 for lib in lib/lib*.so.*; do [ -f "$lib" ] && cp -f "$lib" /usr/lib/; done
 cp -Pf lib/lib*.so /usr/lib/ 2>/dev/null || true
+cp -f  lib/lib*.a  /usr/lib/ 2>/dev/null || true
 mkdir -p /usr/include /usr/lib/pkgconfig
 cp -rf include/* /usr/include/ 2>/dev/null || true
 cp -rf lib/pkgconfig/* /usr/lib/pkgconfig/ 2>/dev/null || true
@@ -192,13 +194,20 @@ make install
 ldconfig
 info "icamerasrc installed"
 
-# === STEP 7: v4l2loopback + systemd service ===
+# === STEP 7: v4l2loopback + on-demand v4l2-relayd service ===
 
-step "Step 7/7: Configuring v4l2loopback and systemd service..."
+step "Step 7/7: Configuring v4l2loopback and on-demand v4l2-relayd service..."
 
-cat > /etc/modprobe.d/ipu6-camera.conf << 'MODEOF'
-options v4l2loopback video_nr=99 card_label="Integrated Camera" exclusive_caps=1
-MODEOF
+# v4l2-relayd runs the camera pipeline only while an app holds the loopback
+# device open, so the sensor (and privacy LED) stay off until the camera is used.
+
+# v4l2loopback options. The v4l2-relayd package ALSO ships
+# /etc/modprobe.d/v4l2-relayd.conf with its own card_label; modprobe.d files load
+# in lexical order and the last card_label wins, so write the SAME options to both
+# files — otherwise the device name won't match CARD_LABEL and relayd can't find it.
+V4L2LOOPBACK_OPTS='options v4l2loopback exclusive_caps=1 card_label="Integrated Camera" video_nr=99'
+echo "$V4L2LOOPBACK_OPTS" > /etc/modprobe.d/ipu6-camera.conf
+echo "$V4L2LOOPBACK_OPTS" > /etc/modprobe.d/v4l2-relayd.conf
 
 cat > /etc/modules-load.d/ipu6-camera.conf << 'LOADEOF'
 mei_vsc
@@ -207,29 +216,32 @@ ivsc_csi
 v4l2loopback
 LOADEOF
 
-cat > /etc/systemd/system/ipu6-camera-loopback.service << 'SVCEOF'
-[Unit]
-Description=IPU6 Camera to V4L2 Loopback
-After=multi-user.target
-ConditionPathExists=/dev/video99
+# CARD_LABEL must exactly match the v4l2loopback card_label above (relayd locates
+# the device by name). GST_PLUGIN_PATH is required so relayd's GStreamer finds
+# icamerasrc (installed in /usr/lib/gstreamer-1.0, not the default multiarch dir).
+# VIDEOSRC MUST END IN A REAL ELEMENT (identity) — relayd parses it as a bin and a
+# trailing capsfilter fails with "link has no sink".
+cat > /etc/default/v4l2-relayd << 'RELAYEOF'
+GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0:/usr/lib/x86_64-linux-gnu/gstreamer-1.0
+VIDEOSRC="icamerasrc buffer-count=7 ! video/x-raw,format=NV12,width=1280,height=720 ! videoconvert ! video/x-raw,format=YUY2,width=1280,height=720,framerate=30/1 ! identity drop-allocation=true"
+FORMAT=YUY2
+WIDTH=1280
+HEIGHT=720
+FRAMERATE=30/1
+CARD_LABEL="Integrated Camera"
+RELAYEOF
 
-[Service]
-Type=simple
-Environment=GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0:/usr/lib/x86_64-linux-gnu/gstreamer-1.0
-ExecStartPre=/bin/sleep 3
-ExecStart=/usr/bin/gst-launch-1.0 -e icamerasrc buffer-count=7 ! video/x-raw,format=NV12,width=1280,height=720 ! videoconvert ! video/x-raw,format=YUY2,width=1280,height=720,framerate=30/1 ! identity drop-allocation=true ! v4l2sink device=/dev/video99 sync=false
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-SVCEOF
+# Remove the always-on service from earlier versions of this script, if present.
+if [ -f /etc/systemd/system/ipu6-camera-loopback.service ]; then
+    systemctl disable --now ipu6-camera-loopback.service 2>/dev/null || true
+    rm -f /etc/systemd/system/ipu6-camera-loopback.service
+fi
 
 systemctl daemon-reload
-systemctl enable ipu6-camera-loopback.service
+systemctl enable v4l2-relayd.service
 usermod -aG video "${SUDO_USER:-$USER}" 2>/dev/null || true
 for dev in /dev/video{0..47}; do [ -e "$dev" ] && setfacl -b "$dev" 2>/dev/null || true; done
-info "v4l2loopback and systemd service configured"
+info "v4l2loopback and on-demand v4l2-relayd service configured"
 
 # === DONE ===
 
@@ -242,7 +254,7 @@ echo "  Camera: 'Integrated Camera' on /dev/video99"
 echo "  Test:   https://webcamtest.com (Chrome/Brave/Edge)"
 echo "  Note:   Firefox Snap does NOT work"
 echo ""
-echo "  sudo systemctl status ipu6-camera-loopback   # Check"
-echo "  sudo journalctl -u ipu6-camera-loopback -f   # Logs"
-echo "  sudo ./uninstall.sh                          # Remove"
+echo "  sudo systemctl status v4l2-relayd   # Check (idle until an app opens the camera)"
+echo "  sudo journalctl -u v4l2-relayd -f   # Logs"
+echo "  sudo ./uninstall.sh                 # Remove"
 echo ""

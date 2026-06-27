@@ -12,12 +12,15 @@ echo "This will remove the IPU6 camera stack installed by setup.sh."
 read -p "Continue? [y/N] " -n 1 -r; echo
 [[ $REPLY =~ ^[Yy]$ ]] || exit 0
 
-step "Stopping service..."
+step "Stopping services..."
+# on-demand relay (current)
+systemctl disable --now v4l2-relayd 2>/dev/null || true
+# always-on loopback (legacy, removed in newer installs)
 systemctl stop ipu6-camera-loopback 2>/dev/null || true
 systemctl disable ipu6-camera-loopback 2>/dev/null || true
 rm -f /etc/systemd/system/ipu6-camera-loopback.service
 systemctl daemon-reload
-info "Service removed"
+info "Services stopped"
 
 step "Removing DKMS module..."
 dkms remove ipu6-drivers/0.0.0 --all 2>/dev/null || true

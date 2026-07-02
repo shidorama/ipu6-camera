@@ -103,6 +103,21 @@ ls /dev/ipu-psys*
 cat /var/lib/dkms/ipu6-drivers/0.0.0/build/make.log
 ```
 
+### Camera worked before, now no video and no LED after a reboot
+
+The sensor can lose a boot-time power race against the Intel LJCA USB bridge,
+which provides the GPIO chip (`INTC1096`) that `INT3472` uses to power the
+sensor. If the USB bridge enumerates late, `int3472` gives up waiting and the
+sensor probes on dummy power rails, so it never joins the camera pipeline.
+Check for it:
+```bash
+dmesg | grep -iE 'int3472.*INTC1096|ov2740.*dummy regulator'
+# int3472-discrete INT3472:05: cannot find GPIO chip INTC1096:00, deferring
+# ov2740 i2c-INT3474:01: supply AVDD not found, using dummy regulator
+```
+This can't be fixed by reloading modules - it's a boot-order race. Reboot to
+retry it; it usually succeeds.
+
 ### Firefox doesn't see the camera
 
 Firefox Snap can't access v4l2loopback. Use Chrome, Brave, Edge, or install Firefox from `.deb`.

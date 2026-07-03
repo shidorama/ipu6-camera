@@ -118,3 +118,17 @@ fi
 if systemctl is-enabled ipu6-camera-loopback &>/dev/null 2>&1; then
     warn "old always-on ipu6-camera-loopback still enabled — disable it: sudo systemctl disable --now ipu6-camera-loopback"
 fi
+
+# Sensor boot-race mitigation (LJCA platforms only)
+if [ -e /sys/bus/acpi/devices/INTC1096:00 ]; then
+    if systemctl is-enabled ipu6-sensor-recover &>/dev/null; then
+        pass "ipu6-sensor-recover enabled (LJCA boot-race self-healing)"
+    else
+        fail "ipu6-sensor-recover NOT enabled - sensor may vanish after some reboots (LJCA race)"
+    fi
+    if grep -qx "usb_ljca" /etc/initramfs-tools/modules 2>/dev/null; then
+        pass "LJCA modules in initramfs"
+    else
+        warn "LJCA modules not in initramfs - boot race more likely"
+    fi
+fi

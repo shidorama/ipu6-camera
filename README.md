@@ -107,16 +107,26 @@ cat /var/lib/dkms/ipu6-drivers/0.0.0/build/make.log
 
 The sensor can lose a boot-time power race against the Intel LJCA USB bridge,
 which provides the GPIO chip (`INTC1096`) that `INT3472` uses to power the
-sensor. If the USB bridge enumerates late, `int3472` gives up waiting and the
-sensor probes on dummy power rails, so it never joins the camera pipeline.
-Check for it:
+sensor. If the bridge enumerates late, the sensor probes before its power
+GPIOs exist, fails with `-EIO`, and never joins the camera pipeline. Check:
 ```bash
-dmesg | grep -iE 'int3472.*INTC1096|ov2740.*dummy regulator'
-# int3472-discrete INT3472:05: cannot find GPIO chip INTC1096:00, deferring
-# ov2740 i2c-INT3474:01: supply AVDD not found, using dummy regulator
+media-ctl -d /dev/media0 -p | grep -i ov2740   # missing = lost the race
+dmesg | grep -i 'failed to find sensor'
+# ov2740 i2c-INT3474:01: error -EIO: failed to find sensor
 ```
-This can't be fixed by reloading modules - it's a boot-order race. Reboot to
-retry it; it usually succeeds.
+(The `dummy regulator` lines in dmesg are normal and appear on good boots too.)
+
+`setup.sh` mitigates this two ways on LJCA platforms: it loads the LJCA modules
+from initramfs (bridge wins the race), and installs
+`ipu6-sensor-recover.service`, which rebinds the sensor at boot if it lost
+anyway. To recover manually:
+```bash
+sudo ipu6-sensor-recover
+```
+Do NOT reload `intel_skl_int3472_discrete` or the `intel_ipu6` modules to fix
+this: a successful int3472 probe permanently consumes the sensor's ACPI `_DEP`
+entry, so a reloaded int3472 finds no sensor and the camera is dead until
+reboot. Rebinding the sensor driver is the only safe recovery.
 
 ### Firefox doesn't see the camera
 

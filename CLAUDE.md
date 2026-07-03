@@ -79,17 +79,21 @@ v4l2loopback + `v4l2-relayd`.
   it manifests as "no video" even when everything else is correct.
 
 - **The sensor can lose a boot-time power race against the LJCA USB bridge.**
-  `INT3472` (sensor power/GPIO) depends on GPIO chip `INTC1096`, which is
-  provided by `gpio_ljca` over the Intel LJCA USB bridge - a USB device that
-  can enumerate *after* `int3472` has already probed. When that happens,
-  `int3472-discrete` logs `cannot find GPIO chip INTC1096:00, deferring` and
-  `ov2740` probes anyway with `dummy regulator` for AVDD/DOVDD/DVDD, so the
-  sensor never joins the media graph and `icamerasrc` gets "not-negotiated".
-  Symptom: camera worked before, now `/dev/video99` exists but no video and
-  no LED. **Unrecoverable by module reload** (confirmed: unloading/reloading
-  `ov2740` + `int3472-discrete` + `intel_ipu6_isys`/`psys` in order does not
-  re-establish the link) - reboot to retry the race. Check with:
-  `dmesg | grep -iE 'int3472.*INTC1096|ov2740.*dummy regulator'`.
+  `INT3472` (sensor power/GPIO) depends on GPIO chip `INTC1096`, provided by
+  `gpio_ljca` over the Intel LJCA USB bridge - a USB device that can enumerate
+  after the camera modules load. When that happens the `ov2740` probe runs
+  before its power GPIOs exist and fails with `-EIO: failed to find sensor`,
+  so it never joins the media graph and `icamerasrc` gets "not-negotiated".
+  (`dummy regulator` dmesg lines are NORMAL - they appear on good boots too;
+  power is via int3472 GPIOs, not regulators.) Mitigation installed by
+  `setup.sh` on LJCA platforms: LJCA modules in initramfs + the
+  `ipu6-sensor-recover.service` oneshot, which rebinds the sensor if missing
+  (`sensor-recover.sh` in this repo). **Never reload
+  `intel_skl_int3472_discrete` or `intel_ipu6` to fix this**: a successful
+  int3472 probe permanently consumes the sensor's ACPI `_DEP` entry
+  (`acpi_dev_clear_dependencies`), so a reloaded int3472 finds "no
+  dependents", never re-registers the power GPIOs, and the camera is dead
+  until reboot. Driver rebind of `ov2740` alone is the only safe recovery.
 
 ## Hardware support is gated by PCI ID
 

@@ -13,6 +13,13 @@ read -p "Continue? [y/N] " -n 1 -r; echo
 [[ $REPLY =~ ^[Yy]$ ]] || exit 0
 
 step "Stopping services..."
+# sensor boot-race recovery
+systemctl disable ipu6-sensor-recover 2>/dev/null || true
+rm -f /etc/systemd/system/ipu6-sensor-recover.service /usr/local/sbin/ipu6-sensor-recover
+if [ -f /etc/initramfs-tools/modules ] && grep -qE '^(usb|gpio|i2c)_ljca$' /etc/initramfs-tools/modules; then
+    sed -i '/^usb_ljca$/d; /^gpio_ljca$/d; /^i2c_ljca$/d' /etc/initramfs-tools/modules
+    update-initramfs -u
+fi
 # on-demand relay (current)
 systemctl disable --now v4l2-relayd 2>/dev/null || true
 # always-on loopback (legacy, removed in newer installs)

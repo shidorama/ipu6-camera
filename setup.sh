@@ -243,6 +243,42 @@ usermod -aG video "${SUDO_USER:-$USER}" 2>/dev/null || true
 for dev in /dev/video{0..47}; do [ -e "$dev" ] && setfacl -b "$dev" 2>/dev/null || true; done
 info "v4l2loopback and on-demand v4l2-relayd service configured"
 
+# Sensor boot-race mitigation (LJCA platforms only, e.g. ThinkPad X1 Carbon).
+# The sensor's power GPIOs live behind the Intel LJCA USB bridge (INTC1096);
+# if it enumerates after the sensor probes, the camera is dead until recovery.
+if [ -e /sys/bus/acpi/devices/INTC1096:00 ]; then
+    step "Configuring sensor boot-race mitigation (LJCA)..."
+
+    # Load the LJCA stack from initramfs so the USB bridge enumerates well
+    # before the camera modules load from the rootfs.
+    for mod in usb_ljca gpio_ljca i2c_ljca; do
+        grep -qx "$mod" /etc/initramfs-tools/modules 2>/dev/null \
+            || echo "$mod" >> /etc/initramfs-tools/modules
+    done
+    update-initramfs -u
+
+    # Self-healing at boot: rebind the sensor if it lost the race anyway.
+    install -m 755 "$(dirname "$(readlink -f "$0")")/sensor-recover.sh" \
+        /usr/local/sbin/ipu6-sensor-recover
+
+    cat > /etc/systemd/system/ipu6-sensor-recover.service << 'RECEOF'
+[Unit]
+Description=IPU6 camera sensor boot-race recovery
+After=systemd-udevd.service v4l2-relayd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/ipu6-sensor-recover
+
+[Install]
+WantedBy=multi-user.target
+RECEOF
+
+    systemctl daemon-reload
+    systemctl enable ipu6-sensor-recover.service
+    info "LJCA in initramfs + ipu6-sensor-recover.service enabled"
+fi
+
 # === DONE ===
 
 echo ""

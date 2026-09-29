@@ -204,7 +204,7 @@ step "Step 7/7: Configuring v4l2loopback and on-demand v4l2-relayd service..."
 # v4l2loopback options. The v4l2-relayd package ALSO ships
 # /etc/modprobe.d/v4l2-relayd.conf with its own card_label; modprobe.d files load
 # in lexical order and the last card_label wins, so write the SAME options to both
-# files — otherwise the device name won't match CARD_LABEL and relayd can't find it.
+# files - otherwise the device name won't match CARD_LABEL and relayd can't find it.
 V4L2LOOPBACK_OPTS='options v4l2loopback exclusive_caps=1 card_label="Integrated Camera" video_nr=99'
 echo "$V4L2LOOPBACK_OPTS" > /etc/modprobe.d/ipu6-camera.conf
 echo "$V4L2LOOPBACK_OPTS" > /etc/modprobe.d/v4l2-relayd.conf
@@ -219,7 +219,7 @@ LOADEOF
 # CARD_LABEL must exactly match the v4l2loopback card_label above (relayd locates
 # the device by name). GST_PLUGIN_PATH is required so relayd's GStreamer finds
 # icamerasrc (installed in /usr/lib/gstreamer-1.0, not the default multiarch dir).
-# VIDEOSRC MUST END IN A REAL ELEMENT (identity) — relayd parses it as a bin and a
+# VIDEOSRC MUST END IN A REAL ELEMENT (identity) - relayd parses it as a bin and a
 # trailing capsfilter fails with "link has no sink".
 cat > /etc/default/v4l2-relayd << 'RELAYEOF'
 GST_PLUGIN_PATH=/usr/lib/gstreamer-1.0:/usr/lib/x86_64-linux-gnu/gstreamer-1.0

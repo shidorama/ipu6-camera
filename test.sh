@@ -106,7 +106,7 @@ else
 fi
 
 if systemctl is-active v4l2-relayd &>/dev/null; then
-    pass "v4l2-relayd active (idle — sensor/LED only power on when an app opens the camera)"
+    pass "v4l2-relayd active (idle - sensor/LED only power on when an app opens the camera)"
 else
     fail "v4l2-relayd NOT active"
     echo ""
@@ -116,7 +116,7 @@ fi
 
 # Warn if the old always-on service is still present
 if systemctl is-enabled ipu6-camera-loopback &>/dev/null 2>&1; then
-    warn "old always-on ipu6-camera-loopback still enabled — disable it: sudo systemctl disable --now ipu6-camera-loopback"
+    warn "old always-on ipu6-camera-loopback still enabled - disable it: sudo systemctl disable --now ipu6-camera-loopback"
 fi
 
 # Sensor boot-race mitigation (LJCA platforms only)
